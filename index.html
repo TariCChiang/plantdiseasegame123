@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>植物病害防禦戰：防疫大師</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; font-family: 'Microsoft JhengHei', sans-serif; touch-action: none; }
+        #game-container { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        canvas { background-color: #051005; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; color: white; padding: 20px; }
+        .hud-text { text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.9); font-weight: bold; }
+        #target-display {
+            position: absolute; left: 20px; top: 50%; transform: translateY(-50%);
+            background: rgba(0, 40, 0, 0.9); border: 2px solid #4ade80;
+            padding: 15px; border-radius: 12px; width: 220px; pointer-events: none;
+        }
+        #menu-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100;
+        }
+        .btn {
+            background: linear-gradient(135deg, #16a34a, #14532d); color: white;
+            padding: 15px 50px; border-radius: 50px; font-size: 22px; cursor: pointer;
+            border: 2px solid #4ade80; transition: 0.3s; margin-top: 25px; pointer-events: auto;
+        }
+        .level-up-anim {
+            position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
+            font-size: 80px; font-weight: 900; color: #fde047; text-shadow: 0 0 20px #16a34a;
+            animation: levelUpFade 2s forwards; pointer-events: none; z-index: 50;
+        }
+        @keyframes levelUpFade {
+            0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+            20% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+            80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -100%) scale(1); }
+        }
+        .wrong-flash { animation: flashRed 0.4s; }
+        @keyframes flashRed { 0% { background: transparent; } 50% { background: rgba(255,0,0,0.3); } 100% { background: transparent; } }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer">
+        <div class="flex justify-between items-start">
+            <div>
+                <div id="level-title" class="hud-text text-3xl text-yellow-400">第一關：真菌病害</div>
+                <div class="hud-text text-xl text-green-400">得分: <span id="score-val">0</span> / <span id="next-goal">3000</span></div>
+            </div>
+            <div class="hud-text text-2xl text-red-500">生命: <span id="lives-val">3</span></div>
+        </div>
+
+        <div id="target-display">
+            <div class="text-xs text-green-300 font-bold mb-1 uppercase">Target Disease</div>
+            <div id="target-name" class="text-2xl font-black text-white mb-2 leading-tight">---</div>
+            <div id="target-desc" class="text-xs text-gray-300 leading-snug">載入中...</div>
+        </div>
+        
+        <div class="absolute bottom-8 left-1/2 -translate-x-1/2 text-gray-400 text-sm font-medium">
+            按 [ 空白鍵 ] 發射子彈 | 移動控制戰機
+        </div>
+    </div>
+
+    <div id="menu-overlay">
+        <h1 id="menu-title" class="text-6xl font-black text-green-500 mb-6 tracking-tighter hud-text text-center">植物病害防禦戰</h1>
+        <div id="game-over-msg" class="max-w-md text-center text-gray-200 px-6 mb-8 text-lg">
+            根據左側顯示的<span class="text-green-400 font-bold">中文名稱</span>，按空白鍵可擊落攜帶正確<span class="text-yellow-400 font-bold">學名</span>的Q版病原體。<br><br>
+            第一關：真菌 
+        </div>
+        <button id="start-btn" class="btn">開始防疫行動</button>
+    </div>
+</div>
+
+<script>
+    const gameContainer = document.getElementById('game-container');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score-val');
+    const livesEl = document.getElementById('lives-val');
+    const goalEl = document.getElementById('next-goal');
+    const levelTitleEl = document.getElementById('level-title');
+    const targetNameEl = document.getElementById('target-name');
+    const targetDescEl = document.getElementById('target-desc');
+    const menuOverlay = document.getElementById('menu-overlay');
+    const startBtn = document.getElementById('start-btn');
+
+    const LEVEL_DATA = [
+        {
+            name: "第一關：真菌病害",
+            goal: 3000,
+            type: "fungi",
+            diseases: [
+                { cn: "稻熱病", sci: "Pyricularia oryzae", info: "梭形病斑中央灰白", color: "#6ee7b7" },
+                { cn: "白粉病", sci: "Erysiphe spp.", info: "表面白色粉狀黴層", color: "#f8fafc" },
+                { cn: "霜霉病", sci: "Peronospora spp.", info: "葉背灰紫黴層，正面黃斑", color: "#93c5fd" },
+                { cn: "炭疽病", sci: "Colletotrichum spp.", info: "果實凹陷黑斑", color: "#c084fc" },
+                { cn: "灰黴病", sci: "Botrytis cinerea", info: "灰色絨毛狀孢子", color: "#94a3b8" },
+                { cn: "萎凋病", sci: "Fusarium oxysporum", info: "阻塞導管造成萎凋", color: "#fdba74" },
+                { cn: "鏽病", sci: "Puccinia spp.", info: "橘褐色粉狀孢子堆", color: "#ea580c" },
+                { cn: "立枯病", sci: "Rhizoctonia solani", info: "幼苗莖基部腐爛倒伏", color: "#78350f" },
+                { cn: "葉斑病", sci: "Cercospora spp.", info: "褐色圓斑，落葉嚴重", color: "#4ade80" },
+                { cn: "疫病", sci: "Phytophthora spp.", info: "喜積水高濕，水霉病", color: "#fb7185" }
+            ]
+        },
+        {
+            name: "第二關：細菌病害",
+            goal: 6000,
+            type: "bacteria",
+            diseases: [
+                { cn: "青枯病", sci: "Ralstonia solanacearum", info: "迅速萎凋但葉片仍綠", color: "#bef264" },
+                { cn: "細菌性葉枯病", sci: "Xanthomonas oryzae", info: "水浸狀轉黃褐色", color: "#fef08a" },
+                { cn: "細菌性軟腐病", sci: "Pectobacterium carotovorum", info: "組織腐爛散發惡臭", color: "#84cc16" },
+                { cn: "細菌性斑點病", sci: "Xanthomonas spp.", info: "水浸狀小點轉褐色壞死", color: "#a3e635" },
+                { cn: "細菌性潰瘍病", sci: "Clavibacter michiganensis", info: "果實白暈斑(鳥眼斑)", color: "#facc15" },
+                { cn: "柑橘潰瘍病", sci: "Xanthomonas citri", info: "隆起潰瘍狀，有黃暈", color: "#fbbf24" },
+                { cn: "細菌性葉斑病", sci: "Pseudomonas syringae", info: "不規則暗點，伴隨黃暈", color: "#4ade80" },
+                { cn: "細菌性褐斑病", sci: "Acidovorax avenae", info: "褐色條斑，易混淆稻熱病", color: "#b45309" },
+                { cn: "細菌性果斑病", sci: "Acidovorax citrulli", info: "果皮水浸狀斑點後腐爛", color: "#16a34a" },
+                { cn: "細菌性萎凋病", sci: "Xanthomonas campestris", info: "系統性萎凋，維管束褐變", color: "#86efac" }
+            ]
+        },
+        {
+            name: "第三關：病毒病害",
+            goal: 9000,
+            type: "virus",
+            diseases: [
+                { cn: "黃葉捲曲病", sci: "TYLCV", info: "葉捲曲、變黃、矮化", color: "#fde047" },
+                { cn: "花葉病", sci: "CMV", info: "深淺綠花葉，蚜蟲媒介", color: "#4ade80" },
+                { cn: "木瓜輪點病", sci: "PRSV", info: "果實同心圓狀輪紋", color: "#f97316" },
+                { cn: "西瓜嵌紋病", sci: "WMV", info: "葉片嵌紋變形", color: "#22c55e" },
+                { cn: "南瓜黃化病毒病", sci: "CYSDV", info: "葉片黃化但葉脈仍綠", color: "#eab308" },
+                { cn: "水稻條紋病", sci: "RSV", info: "黃白色條紋，飛蝨傳播", color: "#d1d5db" },
+                { cn: "香蕉束頂病", sci: "BBTV", info: "葉片叢生(束頂)，生長停滯", color: "#15803d" },
+                { cn: "辣椒斑駁病", sci: "PepMoV", info: "葉片斑駁、皺縮，畸形", color: "#dc2626" },
+                { cn: "蘭花病毒病", sci: "CymMV", info: "葉片條紋，機械傳播", color: "#d8b4fe" },
+                { cn: "番茄斑萎病毒病", sci: "TSWV", info: "褐色壞死環斑，薊馬傳播", color: "#991b1b" }
+            ]
+        },
+        {
+            name: "第四關：線蟲病害",
+            goal: 14000,
+            type: "nematode",
+            diseases: [
+                { cn: "根瘤線蟲病", sci: "Meloidogyne spp.", info: "根部瘤狀突起", color: "#d97706" },
+                { cn: "根腐線蟲病", sci: "Pratylenchus spp.", info: "根系壞死、褐變，衰弱", color: "#78350f" },
+                { cn: "根結線蟲病", sci: "Heterodera spp.", info: "根表形成結節狀構造", color: "#a16207" },
+                { cn: "孢囊線蟲病", sci: "Globodera spp.", info: "雌蟲死後形成孢囊保護卵", color: "#451a03" },
+                { cn: "莖線蟲病", sci: "Ditylenchus spp.", info: "組織膨大、畸形或腐爛", color: "#f59e0b" },
+                { cn: "針線蟲病", sci: "Tylenchorhynchus spp.", info: "吸食細胞液，根系退化", color: "#fbbf24" },
+                { cn: "匍行線蟲病", sci: "Rotylenchulus reniformis", info: "半內寄生，溫熱地區重", color: "#f87171" },
+                { cn: "螺旋線蟲病", sci: "Helicotylenchus spp.", info: "靜止呈螺旋狀，降低抗性", color: "#9ca3af" },
+                { cn: "鉤線蟲病", sci: "Dolichodorus spp.", info: "根系短小，生育不良", color: "#6b7280" },
+                { cn: "劍線蟲病", sci: "Xiphinema spp.", info: "大型體型，可傳播病毒", color: "#374151" }
+            ]
+        }
+    ];
+
+    let currentLevelIdx = 0;
+    let gameState = 'MENU';
+    let score = 0;
+    let lives = 10;
+    let frameCount = 0;
+    let currentTarget = null;
+    let player = null;
+    let bullets = [];
+    let enemies = [];
+    let particles = [];
+    let stars = [];
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    for (let i = 0; i < 50; i++) {
+        stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 2, speed: Math.random() * 1 + 0.2 });
+    }
+
+    class Player {
+        constructor() { this.x = canvas.width / 2; this.y = canvas.height - 100; this.targetX = this.x; this.targetY = this.y; this.speed = 0.2; this.invincible = 0; }
+        update() {
+            this.x += (this.targetX - this.x) * this.speed;
+            this.y += (this.targetY - this.y) * this.speed;
+            if (this.invincible > 0) this.invincible--;
+        }
+        draw() {
+            if (this.invincible > 0 && frameCount % 6 < 3) return;
+            ctx.save(); ctx.translate(this.x, this.y);
+            ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.moveTo(0, -40); ctx.lineTo(25, 10); ctx.lineTo(0, 0); ctx.lineTo(-25, 10); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = 'white'; ctx.fillRect(-2, -25, 4, 12); ctx.fillRect(-6, -21, 12, 4);
+            ctx.restore();
+        }
+        shoot() { bullets.push(new Bullet(this.x, this.y - 35)); }
+    }
+
+    class Bullet {
+        constructor(x, y) { this.x = x; this.y = y; this.speed = 22; this.active = true; }
+        update() { this.y -= this.speed; if (this.y < -50) this.active = false; }
+        draw() {
+            ctx.fillStyle = '#fde047'; ctx.shadowBlur = 10; ctx.shadowColor = '#fde047';
+            ctx.beginPath(); ctx.arc(this.x, this.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+        }
+    }
+
+    class Enemy {
+        constructor() {
+            const level = LEVEL_DATA[currentLevelIdx];
+            this.data = level.diseases[Math.floor(Math.random() * level.diseases.length)];
+            this.type = level.type;
+            let valid = false;
+            while(!valid) {
+                this.x = Math.random() * (canvas.width - 240) + 120;
+                valid = !enemies.some(e => Math.abs(e.x - this.x) < 140 && e.y < 120);
+            }
+            this.y = -100;
+            this.speed = 1.2 + (score / 15000);
+            this.active = true;
+            this.seed = Math.random() * 10;
+        }
+        update() { this.y += this.speed; if (this.y > canvas.height + 150) this.active = false; }
+        draw() {
+            ctx.save(); ctx.translate(this.x, this.y);
+            const pulse = Math.sin(frameCount * 0.05 + this.seed) * 5;
+            const bodyColor = this.data.color || '#7f1d1d';
+            
+            ctx.fillStyle = bodyColor;
+            ctx.strokeStyle = bodyColor;
+
+            if (this.type === 'fungi') {
+                // Q 版菇類
+                ctx.beginPath(); // 菌柄
+                ctx.roundRect(-10, 0, 20, 30, 5); ctx.fill();
+                ctx.beginPath(); // 菌傘
+                ctx.ellipse(0, -5, 40 + pulse, 25 + pulse/2, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = 'rgba(255,255,255,0.3)'; // 斑點
+                ctx.beginPath(); ctx.arc(-15, -15, 6, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(10, -10, 4, 0, Math.PI*2); ctx.fill();
+            } 
+            else if (this.type === 'virus') {
+                // Q 版病毒 (幾何結構)
+                ctx.lineWidth = 3;
+                for(let i=0; i<6; i++) { // 觸手/刺突
+                    ctx.rotate(Math.PI/3); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, 45+pulse); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(0, 45+pulse, 5, 0, Math.PI*2); ctx.fill();
+                }
+                ctx.beginPath(); // 核心
+                for(let i=0; i<6; i++) {
+                    let angle = i * Math.PI / 3;
+                    let r = 30 + pulse/2;
+                    ctx.lineTo(Math.cos(angle)*r, Math.sin(angle)*r);
+                }
+                ctx.closePath(); ctx.fill();
+            } 
+            else if (this.type === 'nematode') {
+                // Q 版線蟲 (長條蠕動)
+                ctx.lineWidth = 15; ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(0, -40);
+                for(let i=0; i<5; i++) {
+                    ctx.lineTo(Math.sin(frameCount*0.1 + i)*20, -40 + i*20);
+                }
+                ctx.stroke();
+                // 頭部眼睛
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(Math.sin(frameCount*0.1)*20, -40, 5, 0, Math.PI*2); ctx.fill();
+            } 
+            else {
+                // 預設細菌形態
+                ctx.lineWidth = 2;
+                for(let i=0; i<4; i++) {
+                    ctx.beginPath(); ctx.moveTo(Math.cos(i)*20, Math.sin(i)*20);
+                    ctx.quadraticCurveTo(Math.cos(i)*40+pulse, Math.sin(i)*40, Math.cos(i)*50, Math.sin(i)*50+pulse); ctx.stroke();
+                }
+                ctx.beginPath(); ctx.ellipse(0, 0, 35+pulse/2, 25-pulse/2, pulse*0.01, 0, Math.PI*2); ctx.fill();
+            }
+
+            // 統一眼睛 (除非是線蟲另畫)
+            if (this.type !== 'nematode') {
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(-10, -5, 6, 0, Math.PI*2); ctx.arc(10, -5, 6, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'black'; ctx.beginPath(); ctx.arc(-10+Math.sin(frameCount*0.1)*2, -5, 3, 0, Math.PI*2); ctx.arc(10+Math.sin(frameCount*0.1)*2, -5, 3, 0, Math.PI*2); ctx.fill();
+            }
+
+            // 學名標籤
+            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.roundRect(-75, 45, 150, 24, 5); ctx.fill();
+            ctx.fillStyle = '#fde047'; ctx.font = 'italic bold 16px Arial'; ctx.textAlign = 'center'; ctx.fillText(this.data.sci, 0, 62);
+            ctx.restore();
+        }
+    }
+
+    class Particle {
+        constructor(x, y, color) { this.x = x; this.y = y; this.color = color; this.vx = (Math.random()-0.5)*10; this.vy = (Math.random()-0.5)*10; this.alpha = 1; }
+        update() { this.x += this.vx; this.y += this.vy; this.alpha -= 0.03; }
+        draw() { if (this.alpha <= 0) return; ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color; ctx.beginPath(); ctx.arc(this.x, this.y, 3, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }
+    }
+
+    function refreshTarget() {
+        const level = LEVEL_DATA[currentLevelIdx];
+        currentTarget = level.diseases[Math.floor(Math.random() * level.diseases.length)];
+        targetNameEl.innerText = currentTarget.cn;
+        targetDescEl.innerText = currentTarget.info;
+    }
+
+    function checkLevelProgress() {
+        const currentGoal = LEVEL_DATA[currentLevelIdx].goal;
+        if (score >= currentGoal) {
+            if (currentLevelIdx < LEVEL_DATA.length - 1) {
+                currentLevelIdx++;
+                showLevelUpEffect();
+                player.invincible = 120;
+                refreshTarget();
+                updateUI();
+            } else if (score >= 14000) gameWin();
+        }
+    }
+
+    function showLevelUpEffect() {
+        const div = document.createElement('div');
+        div.className = 'level-up-anim';
+        div.innerText = 'LEVEL UP!';
+        gameContainer.appendChild(div);
+        setTimeout(() => div.remove(), 2000);
+    }
+
+    function updateUI() {
+        const level = LEVEL_DATA[currentLevelIdx];
+        scoreEl.innerText = score;
+        goalEl.innerText = level.goal;
+        levelTitleEl.innerText = level.name;
+        livesEl.innerText = lives;
+    }
+
+    function handleCollisions() {
+        for (let bi = bullets.length - 1; bi >= 0; bi--) {
+            const b = bullets[bi];
+            for (let ei = enemies.length - 1; ei >= 0; ei--) {
+                const e = enemies[ei];
+                if (Math.hypot(b.x - e.x, b.y - e.y) < 50) {
+                    bullets.splice(bi, 1);
+                    if (e.data.sci === currentTarget.sci) {
+                        score += 500;
+                        for(let i=0; i<20; i++) particles.push(new Particle(e.x, e.y, e.data.color));
+                        enemies.splice(ei, 1);
+                        refreshTarget();
+                        checkLevelProgress();
+                    } else {
+                        lives--;
+                        gameContainer.classList.add('wrong-flash');
+                        setTimeout(() => gameContainer.classList.remove('wrong-flash'), 400);
+                        for(let i=0; i<20; i++) particles.push(new Particle(e.x, e.y, '#f00'));
+                        enemies.splice(ei, 1);
+                    }
+                    updateUI();
+                    if(lives <= 0) gameOver();
+                    break;
+                }
+            }
+        }
+        for (let ei = enemies.length - 1; ei >= 0; ei--) {
+            const e = enemies[ei];
+            if (Math.hypot(player.x - e.x, player.y - e.y) < 45 && player.invincible <= 0) {
+                lives--; player.invincible = 90; updateUI();
+                if(lives <= 0) gameOver();
+            }
+        }
+    }
+
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        menuOverlay.style.display = 'flex';
+        document.getElementById('menu-title').innerText = '防疫防線潰散';
+        document.getElementById('game-over-msg').innerHTML = `得分: ${score}<br>敗於${LEVEL_DATA[currentLevelIdx].name}`;
+        startBtn.innerText = '重新挑戰';
+    }
+
+    function gameWin() {
+        gameState = 'WIN';
+        menuOverlay.style.display = 'flex';
+        document.getElementById('menu-title').innerText = '農業守護神！';
+        document.getElementById('game-over-msg').innerHTML = `恭喜達成終極防疫！<br>所有病原體已被完全隔離。<br>總得分: ${score}`;
+        startBtn.innerText = '再次巡田';
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        stars.forEach(s => { s.y += s.speed; if (s.y > canvas.height) s.y = -10; ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(s.x, s.y, s.size, s.size); });
+
+        if (gameState === 'PLAYING') {
+            frameCount++;
+            if (frameCount % 100 === 0) enemies.push(new Enemy());
+            player.update(); player.draw();
+            bullets.forEach((b, i) => { b.update(); b.draw(); if(!b.active) bullets.splice(i,1); });
+            enemies.forEach((e, i) => { e.update(); e.draw(); if(!e.active) enemies.splice(i,1); });
+            particles.forEach((p, i) => { p.update(); p.draw(); if(p.alpha<=0) particles.splice(i,1); });
+            handleCollisions();
+        }
+        requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('mousemove', (e) => { if(player && gameState === 'PLAYING') { player.targetX = e.clientX; player.targetY = e.clientY; }});
+    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && gameState === 'PLAYING') player.shoot(); });
+    startBtn.addEventListener('click', () => {
+        currentLevelIdx = 0; score = 0; lives = 10;
+        initGame(); gameState = 'PLAYING'; menuOverlay.style.display = 'none';
+    });
+    function initGame() { player = new Player(); bullets = []; enemies = []; particles = []; refreshTarget(); updateUI(); }
+    loop();
+</script>
+
+</body>
+</html>
