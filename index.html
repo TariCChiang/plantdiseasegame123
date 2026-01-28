@@ -54,11 +54,15 @@
             font-size: 18px;
         }
 
-        #menu-overlay {
+        #menu-overlay, #briefing-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column;
+            background: rgba(0, 0, 0, 0.95); display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 100;
         }
+
+        /* 簡報畫面預設隱藏 */
+        #briefing-overlay { background: rgba(5, 20, 5, 0.98); display: none; z-index: 110; }
+
         .btn {
             background: linear-gradient(135deg, #16a34a, #14532d); color: white;
             padding: 12px 40px; border-radius: 50px; font-size: 20px; cursor: pointer;
@@ -76,6 +80,27 @@
         }
         .wrong-flash { animation: flashRed 0.4s; }
         @keyframes flashRed { 0% { background: transparent; } 50% { background: rgba(255,0,0,0.3); } 100% { background: transparent; } }
+
+        /* 簡報內容表格樣式 */
+        .briefing-card {
+            background: rgba(20, 40, 20, 0.8);
+            border: 1px solid #22c55e;
+            border-radius: 12px;
+            padding: 20px;
+            width: 90%;
+            max-width: 400px;
+            max-height: 60vh; /* 限制高度，避免在小手機上超出 */
+            overflow-y: auto;  /* 內容多時可捲動 */
+        }
+        .disease-item {
+            border-bottom: 1px solid rgba(74, 222, 128, 0.2);
+            padding: 8px 0;
+            text-align: left;
+        }
+        /* 自定義捲軸 */
+        .briefing-card::-webkit-scrollbar { width: 6px; }
+        .briefing-card::-webkit-scrollbar-track { background: #051005; }
+        .briefing-card::-webkit-scrollbar-thumb { background: #16a34a; border-radius: 3px; }
     </style>
 </head>
 <body>
@@ -86,6 +111,7 @@
     <!-- 虛擬按鍵 -->
     <div id="fire-button"></div>
     
+    <!-- UI 層 -->
     <div id="ui-layer">
         <div class="flex justify-between items-start">
             <div>
@@ -106,11 +132,22 @@
         </div>
     </div>
 
+    <!-- 關卡簡報畫面 (新增) -->
+    <div id="briefing-overlay">
+        <div class="text-yellow-400 text-sm font-bold mb-2 uppercase tracking-widest">Mission Briefing</div>
+        <h2 id="briefing-level-name" class="text-2xl font-black text-white mb-4">關卡名稱</h2>
+        <div class="briefing-card mb-4" id="briefing-content">
+            <!-- JS 動態填入病害列表 -->
+        </div>
+        <button id="briefing-btn" class="btn">接受任務</button>
+    </div>
+
+    <!-- 主選單畫面 -->
     <div id="menu-overlay">
         <h1 id="menu-title" class="text-4xl font-black text-green-500 mb-4 tracking-tighter hud-text text-center px-4">植物病害防禦戰</h1>
         <div id="game-over-msg" class="max-w-xs text-center text-gray-200 px-4 mb-6 text-sm">
             看清左側顯示的<span class="text-green-400 font-bold">中文名稱</span>，<br>擊落攜帶對應<span class="text-yellow-400 font-bold">學名</span>的病原體。<br><br>
-            <span class="text-red-400">優化：</span>左手移動戰機，<br>右手點擊右下角 <span class="font-bold">FIRE</span> 鈕射擊！
+            <span class="text-red-400">操作：</span>左手移動戰機，<br>右手點擊右下角 <span class="font-bold">FIRE</span> 鈕射擊！
         </div>
         <button id="start-btn" class="btn">開始防疫行動</button>
     </div>
@@ -127,6 +164,12 @@
     const targetNameEl = document.getElementById('target-name');
     const targetDescEl = document.getElementById('target-desc');
     const menuOverlay = document.getElementById('menu-overlay');
+    // 新增簡報相關元素
+    const briefingOverlay = document.getElementById('briefing-overlay');
+    const briefingContent = document.getElementById('briefing-content');
+    const briefingLevelName = document.getElementById('briefing-level-name');
+    const briefingBtn = document.getElementById('briefing-btn');
+    
     const startBtn = document.getElementById('start-btn');
     const fireBtn = document.getElementById('fire-button');
 
@@ -276,14 +319,47 @@
         targetDescEl.innerText = currentTarget.info;
     }
 
+    // 顯示關卡簡報
+    function showBriefing(levelIdx) {
+        gameState = 'BRIEFING';
+        const level = LEVEL_DATA[levelIdx];
+        briefingLevelName.innerText = level.name;
+        
+        let html = '';
+        level.diseases.forEach(d => {
+            html += `
+                <div class="disease-item">
+                    <div class="text-green-400 font-bold text-lg">${d.cn}</div>
+                    <div class="text-yellow-200 italic font-mono text-sm">${d.sci}</div>
+                    <div class="text-gray-400 text-xs mt-1">${d.info}</div>
+                </div>
+            `;
+        });
+        briefingContent.innerHTML = html;
+        briefingOverlay.style.display = 'flex';
+        fireBtn.style.display = 'none'; // 簡報時隱藏射擊鈕
+    }
+
+    // 開始該關卡遊戲
+    function startLevel() {
+        briefingOverlay.style.display = 'none';
+        gameState = 'PLAYING';
+        fireBtn.style.display = 'flex';
+        if (!player) player = new Player();
+        refreshTarget();
+        updateUI();
+    }
+
     function checkLevelProgress() {
         if (score >= LEVEL_DATA[currentLevelIdx].goal) {
             if (currentLevelIdx < LEVEL_DATA.length - 1) {
                 currentLevelIdx++;
                 showLevelUpEffect();
                 player.invincible = 100;
-                refreshTarget();
-                updateUI();
+                // 升級動畫後，先進入簡報畫面，再開始下一關
+                setTimeout(() => {
+                    showBriefing(currentLevelIdx);
+                }, 2000);
             } else { gameWin(); }
         }
     }
@@ -369,8 +445,10 @@
         if (gameState === 'PLAYING') {
             frameCount++;
             if (frameCount % 105 === 0) enemies.push(new Enemy());
-            player.update(); 
-            player.draw();
+            if (player) {
+                player.update(); 
+                player.draw();
+            }
             bullets.forEach((b, i) => { b.update(); b.draw(); if(!b.active) bullets.splice(i,1); });
             enemies.forEach((e, i) => { e.update(); e.draw(); if(!e.active) enemies.splice(i,1); });
             particles.forEach((p, i) => { p.update(); p.draw(); if(p.alpha<=0) particles.splice(i,1); });
@@ -381,8 +459,7 @@
 
     // 移動邏輯 (全螢幕感應，但不射擊)
     window.addEventListener('touchstart', (e) => {
-        if(gameState === 'PLAYING') {
-            // 如果點擊的不是射擊按鈕，則移動
+        if(gameState === 'PLAYING' && player) {
             if(e.target !== fireBtn) {
                 const touch = e.touches[0];
                 player.targetX = touch.clientX;
@@ -392,7 +469,7 @@
     }, { passive: false });
 
     window.addEventListener('touchmove', (e) => {
-        if(gameState === 'PLAYING') {
+        if(gameState === 'PLAYING' && player) {
             const touch = Array.from(e.touches).find(t => t.target !== fireBtn) || e.touches[0];
             player.targetX = touch.clientX;
             player.targetY = touch.clientY - 60;
@@ -402,10 +479,10 @@
 
     // 射擊按鈕邏輯
     fireBtn.addEventListener('touchstart', (e) => {
-        if(gameState === 'PLAYING') {
+        if(gameState === 'PLAYING' && player) {
             player.shoot();
         }
-        e.stopPropagation(); // 防止觸發背景的移動邏輯
+        e.stopPropagation();
     }, { passive: false });
 
     // 滑鼠與鍵盤 (相容桌面)
@@ -415,15 +492,21 @@
             player.targetY = e.clientY;
         }
     });
-    window.addEventListener('keydown', (e) => { if (e.code === 'Space' && gameState === 'PLAYING') player.shoot(); });
+    window.addEventListener('keydown', (e) => { 
+        if (e.code === 'Space' && gameState === 'PLAYING' && player) player.shoot(); 
+    });
 
     startBtn.addEventListener('click', () => {
         currentLevelIdx = 0; score = 0; lives = 10;
         player = new Player(); bullets = []; enemies = []; particles = [];
-        refreshTarget(); updateUI();
-        gameState = 'PLAYING';
         menuOverlay.style.display = 'none';
-        fireBtn.style.display = 'flex';
+        // 點擊開始後，先顯示第一關簡報
+        showBriefing(currentLevelIdx);
+    });
+
+    // 簡報頁面的按鈕事件
+    briefingBtn.addEventListener('click', () => {
+        startLevel();
     });
 
     fireBtn.style.display = 'none'; // 初始隱藏
@@ -432,3 +515,4 @@
 
 </body>
 </html>
+
